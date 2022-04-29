@@ -18,7 +18,7 @@ public extension Runnable {
     }
     
     static func * (left: Self, right: Int) -> Repeat {
-        Repeat(.count(right), builtAction: { left })
+        Repeat(.count(right), runnable: { left })
     }
     
     static func * (left: Int, right: Self) -> Repeat {
@@ -32,23 +32,23 @@ public extension Runnable {
         }
     }
     
-    static func + (left: Self, right: Runnable) -> Sequence {
-        right + left
-    }
-    
     static func & (left: Self, right: Runnable) -> Group {
         Group {
             left
             right
         }
     }
-    
-    static func & (left: Runnable, right: Self) -> Group {
-        right & left
-    }
-    
+}
+ 
+public extension Runnable {
     func reversed() -> SKAction {
         action.reversed()
+    }
+    
+    func changeTarget(to node: SKNode) -> Custom {
+        Custom {
+            node.run(action)
+        }
     }
     
     func timingMode(_ mode: SKActionTimingMode) -> SKAction {
@@ -68,22 +68,12 @@ public extension Runnable {
         modifiedAction.speed = factor
         return modifiedAction
     }
-    
-    func runOn(_ node: SKNode) -> Custom {
-        Custom {
-            node.run(action)
-        }
-    }
 }
 
 @resultBuilder
 public struct ActionBuilder {
-    public static func buildExpression(_ expression: Runnable) -> [Runnable] {
-        [expression]
-    }
-    
     public static func buildBlock(_ components: [Runnable]...) -> [Runnable] {
-        return Array(components.joined())
+        Array(components.joined())
     }
     
     public static func buildOptional(_ component: [Runnable]?) -> [Runnable] {
@@ -92,19 +82,35 @@ public struct ActionBuilder {
         }
         return component
     }
+    
+    public static func buildEither(first component: [Runnable]) -> [Runnable] {
+        component
+    }
+    
+    public static func buildEither(second component: [Runnable]) -> [Runnable] {
+        component
+    }
+    
+    public static func buildArray(_ components: [[Runnable]]) -> [Runnable] {
+        Array(components.joined())
+    }
+    
+    public static func buildExpression(_ expression: Runnable) -> [Runnable] {
+        [expression]
+    }
 }
 
 public protocol RunnableCollection: Runnable {
     var actions: [SKAction] { get }
     
-    init(@ActionBuilder animation: () -> [Runnable])
+    init(@ActionBuilder builtAction: () -> [Runnable])
     
     init(actions: [SKAction])
 }
 
 public extension RunnableCollection {
-    init(@ActionBuilder animation: () -> [Runnable]) {
-        self.init(actions: animation().map({ $0.action }))
+    init(@ActionBuilder builtAction: () -> [Runnable]) {
+        self.init(actions: builtAction().map({ $0.action }))
     }
 }
 
@@ -124,6 +130,10 @@ public extension SKNode {
             }
         }
     }
+    
+    func run(withKey key: String? = nil, _ runnable: () -> Runnable, completion block: (() -> Void)? = nil) {
+        run(runnable(), withKey: key, completion: block)
+    }
 }
 
 extension SKAction: Runnable {
@@ -134,7 +144,7 @@ public struct Sequence: RunnableCollection {
     public private(set) var actions: [SKAction]
     
     public var action: SKAction {
-        SKAction.sequence(actions)
+        .sequence(actions)
     }
     
     public init(actions: [SKAction]) {
@@ -146,7 +156,7 @@ public struct Group: RunnableCollection {
     public private(set) var actions: [SKAction]
     
     public var action: SKAction {
-        SKAction.group(actions)
+        .group(actions)
     }
     
     public init(actions: [SKAction]) {
@@ -156,22 +166,20 @@ public struct Group: RunnableCollection {
 
 public struct Repeat: Runnable {
     public let action: SKAction
-    let repetitions: Repetitions
     
     public enum Repetitions {
         case count(Int)
         case infinite
     }
     
-    public init(_ repetitions: Repetitions, @ActionBuilder builtAction: () -> [Runnable]) {
-        self.repetitions = repetitions
-        let repeatAction = Sequence(animation: builtAction).action
+    public init(_ repetitions: Repetitions, runnable: () -> Runnable) {
+        let repeatAction = runnable().action
         
         switch repetitions {
             case let .count(count):
-                action = SKAction.repeat(repeatAction, count: count)
+                action = .repeat(repeatAction, count: count)
             case .infinite:
-                action = SKAction.repeatForever(repeatAction)
+                action = .repeatForever(repeatAction)
         }
     }
 }
@@ -179,78 +187,87 @@ public struct Repeat: Runnable {
 public struct Wait: Runnable {
     public let action: SKAction
     
-    public init(_ duration: TimeInterval = 1) {
-        action = SKAction.wait(forDuration: duration)
+    public init(_ duration: TimeInterval = 0.5) {
+        action = .wait(forDuration: duration)
     }
 }
 
 public struct Move: Runnable {
     public let action: SKAction
     
-    public init(to point: (x: Double, y: Double) = (0, 0), duration: TimeInterval = 1) {
-        action = SKAction.move(to: CGPoint(x: point.x, y: point.y), duration: duration)
+    public init(to point: (x: Double, y: Double) = (0, 0), over interval: TimeInterval = 1) {
+        action = .move(to: CGPoint(x: point.x, y: point.y), duration: interval)
     }
     
-    public init(by delta: (x: Double, y: Double), duration: TimeInterval = 1) {
-        action = SKAction.move(by: CGVector(dx: delta.x, dy: delta.y), duration: duration)
+    public init(by delta: (x: Double, y: Double), over interval: TimeInterval = 1) {
+        action = .move(by: CGVector(dx: delta.x, dy: delta.y), duration: interval)
     }
     
-    public init(by vector: CGVector, duration: TimeInterval = 1) {
-        action = SKAction.move(by: vector, duration: duration)
+    public init(by vector: CGVector, over interval: TimeInterval = 1) {
+        action = .move(by: vector, duration: interval)
     }
 }
 
 public struct Rotate: Runnable {
     public var action: SKAction
     
-    public init(by angleRadians: Double, duration: TimeInterval = 1) {
-        action = SKAction.rotate(byAngle: angleRadians, duration: duration)
+    public init(to angleRadians: Double, over interval: TimeInterval = 1) {
+        action = .rotate(toAngle: angleRadians, duration: interval)
+    }
+    
+    public init(by angleRadians: Double, over interval: TimeInterval = 1) {
+        action = .rotate(byAngle: angleRadians, duration: interval)
     }
 }
 
 public struct Scale: Runnable {
     public let action: SKAction
     
-    public init(to factor: Double = 1, duration: TimeInterval) {
-        action = SKAction.scale(to: factor, duration: duration)
+    public init(to factor: Double = 1, over interval: TimeInterval) {
+        action = .scale(to: factor, duration: interval)
     }
     
-    public init(by scale: Double, duration: TimeInterval) {
-        action = SKAction.scale(by: scale, duration: duration)
+    public init(by scale: Double, over interval: TimeInterval) {
+        action = .scale(by: scale, duration: interval)
     }
 }
 
-public struct FadeIn: Runnable {
+public struct Fade: Runnable {
     public let action: SKAction
     
-    public init(_ duration: TimeInterval = 1) {
-        action = SKAction.fadeIn(withDuration: duration)
+    public static func `in`(over interval: TimeInterval = 1) -> Fade {
+        Fade(to: 1, over: interval)
+    }
+    
+    public static func out(over interval: TimeInterval = 1) -> Fade {
+        Fade(to: 0, over: interval)
+    }
+    
+    public init(to amount: Double, over interval: TimeInterval = 1) {
+        action = .fadeAlpha(to: amount, duration: interval)
+    }
+    
+    public init(by amount: Double, over interval: TimeInterval = 1) {
+        action = .fadeAlpha(by: amount, duration: interval)
     }
 }
 
-public struct FadeOut: Runnable {
+public struct Colorize: Runnable {
     public let action: SKAction
     
-    public init(_ duration: TimeInterval = 1) {
-        action = SKAction.fadeOut(withDuration: duration)
+    public init(with color: UIColor, colorBlendFactor: CGFloat = 0.5, over interval: TimeInterval = 1) {
+        action = .colorize(with: color, colorBlendFactor: colorBlendFactor, duration: interval)
     }
 }
-
-// animate, texture, colorize, fade
 
 public struct Hide: Runnable {
-    public var action: SKAction {
-        SKAction.hide()
-    }
+    public var action: SKAction = .hide()
     
     public init() {}
 }
 
-// these could be written as global functions instead, but with parentheses and lowercased
 public struct Unhide: Runnable {
-    public var action: SKAction {
-        SKAction.unhide()
-    }
+    public let action: SKAction = .unhide()
     
     public init() {}
 }
@@ -258,13 +275,13 @@ public struct Unhide: Runnable {
 public struct PlaySound: Runnable {
     public let action: SKAction
     
-    public init(_ file: String, waitForCompletion: Bool = false) {
-        action = SKAction.playSoundFileNamed(file, waitForCompletion: waitForCompletion)
+    public init(_ file: String, waitUntilPlaybackEnds wait: Bool = false) {
+        action = .playSoundFileNamed(file, waitForCompletion: wait)
     }
 }
 
 public struct Remove: Runnable {
-    public let action = SKAction.removeFromParent()
+    public let action: SKAction = .removeFromParent()
     
     public init() {}
 }
@@ -272,11 +289,11 @@ public struct Remove: Runnable {
 public struct Custom: Runnable {
     public let action: SKAction
     
-    public init(duration: TimeInterval = .zero, block: @escaping (_ targetNode: SKNode, _ elapsedTime: CGFloat) -> Void) {
-        action = SKAction.customAction(withDuration: duration, actionBlock: block)
+    public init(over interval: TimeInterval = .zero, block: @escaping (_ targetNode: SKNode, _ elapsedTime: CGFloat) -> Void) {
+        action = .customAction(withDuration: interval, actionBlock: block)
     }
     
     public init(block: @escaping () -> Void) {
-        action = SKAction.run(block)
+        action = .run(block)
     }
 }
